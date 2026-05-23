@@ -1,28 +1,36 @@
 from random import randint
-import sys, traceback, threading, socket
+from time import time
+import sys, traceback, threading, socket, math
 
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
 
+# ── MTU / Fragmentation constants ──────────────────────────────────────────────
+MAX_UDP_PAYLOAD = 1400  # bytes — conservative, fits inside Ethernet MTU
+RTP_HEADER_SIZE = 12    # bytes — standard fixed RTP header
+MAX_RTP_PAYLOAD = MAX_UDP_PAYLOAD - RTP_HEADER_SIZE  # 1388 bytes per fragment
+# ────────────────────────────────────────────────────────────────────────────────
+
 class ServerWorker:
-	SETUP = 'SETUP'
-	PLAY = 'PLAY'
-	PAUSE = 'PAUSE'
+	SETUP    = 'SETUP'
+	PLAY     = 'PLAY'
+	PAUSE    = 'PAUSE'
 	TEARDOWN = 'TEARDOWN'
 	
-	INIT = 0
-	READY = 1
+	INIT    = 0
+	READY   = 1
 	PLAYING = 2
-	state = INIT
+	state   = INIT
 
-	OK_200 = 0
+	OK_200           = 0
 	FILE_NOT_FOUND_404 = 1
-	CON_ERR_500 = 2
+	CON_ERR_500      = 2
 	
 	clientInfo = {}
 	
 	def __init__(self, clientInfo):
 		self.clientInfo = clientInfo
+		self.seqNum = 0   # Global RTP sequence number — increments per fragment (16-bit)
 		
 	def run(self):
 		threading.Thread(target=self.recvRtspRequest).start()
@@ -83,7 +91,7 @@ class ServerWorker:
 				
 				# Create a new thread and start sending RTP packets
 				self.clientInfo['event'] = threading.Event()
-				self.clientInfo['worker']= threading.Thread(target=self.sendRtp) 
+				self.clientInfo['worker'] = threading.Thread(target=self.sendRtp) 
 				self.clientInfo['worker'].start()
 		
 		# Process PAUSE request
@@ -106,52 +114,76 @@ class ServerWorker:
 			
 			# Close the RTP socket
 			self.clientInfo['rtpSocket'].close()
-			
+
 	def sendRtp(self):
-		"""Send RTP packets over UDP."""
+		"""Send RTP packets over UDP — uses fragmentAndSend() for MTU compliance."""
 		while True:
-			self.clientInfo['event'].wait(0.05) 
+			self.clientInfo['event'].wait(0.05)
 			
 			# Stop sending if request is PAUSE or TEARDOWN
-			if self.clientInfo['event'].isSet(): 
-				break 
+			if self.clientInfo['event'].isSet():
+				break
 				
 			data = self.clientInfo['videoStream'].nextFrame()
-			if data: 
-				frameNumber = self.clientInfo['videoStream'].frameNbr()
+			if data:
 				try:
 					address = self.clientInfo['rtspSocket'][1][0]
-					port = int(self.clientInfo['rtpPort'])
-					self.clientInfo['rtpSocket'].sendto(self.makeRtp(data, frameNumber),(address,port))
-				except:
-					print("Connection Error")
-					data = self.rtpSocket.recv(20480)
-					print("client received RTP len =", len(data))
-					#print('-'*60)
-					#traceback.print_exc(file=sys.stdout)
-					#print('-'*60)
+					port    = int(self.clientInfo['rtpPort'])
+					self.fragmentAndSend(data, address, port)
+				except Exception as e:
+					print("Connection Error:", e)
+					print('-'*60)
+					traceback.print_exc(file=sys.stdout)
+					print('-'*60)
 
-	def makeRtp(self, payload, frameNbr):
-		"""RTP-packetize the video data."""
-		version = 2
-		padding = 0
+	def fragmentAndSend(self, data, address, port):
+		"""Fragment a video frame into MTU-sized RTP packets and transmit over UDP.
+
+		Standard RTP fields only — no custom application header:
+		  • Timestamp : one value shared by every fragment of this frame
+		               (90 kHz clock, as per RFC 2435 for MJPEG)
+		  • Sequence  : increments globally across all packets
+		  • Marker    : set to 1 on the last fragment only (signals frame boundary
+		               to the receiver, per RFC 3550 §5.3)
+		"""
+		total_len   = len(data)
+		total_frags = math.ceil(total_len / MAX_RTP_PAYLOAD)
+
+		# Single 90 kHz RTP timestamp for the entire frame (32-bit wrap-around)
+		frame_ts = int(time() * 90000) & 0xFFFFFFFF
+
+		for idx in range(total_frags):
+			start   = idx * MAX_RTP_PAYLOAD
+			chunk   = data[start : start + MAX_RTP_PAYLOAD]
+			marker  = 1 if (idx == total_frags - 1) else 0
+
+			packet = self.makeRtp(chunk, self.seqNum, marker, frame_ts)
+			self.clientInfo['rtpSocket'].sendto(packet, (address, port))
+			self.seqNum = (self.seqNum + 1) & 0xFFFF  # 16-bit wrap-around
+
+		print(f"[TX] ts={frame_ts} | {total_frags:3d} frags | {total_len:6d} bytes")
+
+	def makeRtp(self, payload, seqnum, marker=0, timestamp=None):
+		"""RTP-packetize a payload chunk.
+		
+		Passing an explicit *timestamp* ensures every fragment of the same
+		video frame carries an identical value for client-side reassembly.
+		"""
+		version   = 2
+		padding   = 0
 		extension = 0
-		cc = 0
-		marker = 0
-		pt = 26 # MJPEG type
-		seqnum = frameNbr
-		ssrc = 0 
-		
+		cc        = 0
+		pt        = 26  # MJPEG payload type
+		ssrc      = 0
+
 		rtpPacket = RtpPacket()
-		
-		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload)
-		
+		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc,
+		                 payload, timestamp)
 		return rtpPacket.getPacket()
 		
 	def replyRtsp(self, code, seq):
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
-			#print("200 OK")
 			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
