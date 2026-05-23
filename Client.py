@@ -61,29 +61,52 @@ class Client:
 		
 	def createWidgets(self):
 		"""Build GUI."""
+		self.timerLabel = Label(self.master, text="00:00", font=("Helvetica", 12))
+		self.timerLabel.grid(row=1, column=0, columnspan=4, padx=5, pady=5)
+
 		self.setup = Button(self.master, width=20, padx=3, pady=3)
 		self.setup["text"]    = "Setup"
 		self.setup["command"] = self.setupMovie
-		self.setup.grid(row=1, column=0, padx=2, pady=2)
+		self.setup.grid(row=2, column=0, padx=2, pady=2)
 		
 		self.start = Button(self.master, width=20, padx=3, pady=3)
 		self.start["text"]    = "Play"
 		self.start["command"] = self.playMovie
-		self.start.grid(row=1, column=1, padx=2, pady=2)
+		self.start.grid(row=2, column=1, padx=2, pady=2)
 		
 		self.pause = Button(self.master, width=20, padx=3, pady=3)
 		self.pause["text"]    = "Pause"
 		self.pause["command"] = self.pauseMovie
-		self.pause.grid(row=1, column=2, padx=2, pady=2)
+		self.pause.grid(row=2, column=2, padx=2, pady=2)
 		
 		self.teardown = Button(self.master, width=20, padx=3, pady=3)
 		self.teardown["text"]    = "Teardown"
 		self.teardown["command"] = self.exitClient
-		self.teardown.grid(row=1, column=3, padx=2, pady=2)
+		self.teardown.grid(row=2, column=3, padx=2, pady=2)
 		
 		self.label = Label(self.master, height=19)
 		self.label.grid(row=0, column=0, columnspan=4, sticky=W+E+N+S, padx=5, pady=5)
-	
+		
+		self.updateUI()
+
+	def updateUI(self):
+		"""Update GUI buttons state based on current client state."""
+		if self.state == self.INIT:
+			self.setup['state'] = NORMAL
+			self.start['state'] = DISABLED
+			self.pause['state'] = DISABLED
+			self.teardown['state'] = NORMAL
+		elif self.state == self.READY:
+			self.setup['state'] = DISABLED
+			self.start['state'] = NORMAL
+			self.pause['state'] = DISABLED
+			self.teardown['state'] = NORMAL
+		elif self.state == self.PLAYING:
+			self.setup['state'] = DISABLED
+			self.start['state'] = DISABLED
+			self.pause['state'] = NORMAL
+			self.teardown['state'] = NORMAL
+
 	def setupMovie(self):
 		"""Setup button handler."""
 		if self.state == self.INIT:
@@ -212,6 +235,12 @@ class Client:
 		try:
 			frame_data = self.frameQueue.get_nowait()
 			self.updateMovie(self.writeFrame(frame_data))
+			
+			self.frameNbr += 1
+			total_seconds = self.frameNbr // 20
+			mins = total_seconds // 60
+			secs = total_seconds % 60
+			self.timerLabel.configure(text=f"{mins:02d}:{secs:02d}")
 		except queue.Empty:
 			pass  # Nothing ready yet — reschedule and wait
 		finally:
@@ -331,6 +360,7 @@ class Client:
 					elif self.requestSent == self.TEARDOWN:
 						self.state = self.INIT
 						self.teardownAcked = 1
+					self.master.after(0, self.updateUI)
 	
 	def openRtpPort(self):
 		"""Open RTP socket binded to a specified port."""
