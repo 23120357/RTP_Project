@@ -158,6 +158,8 @@ class Client:
 				rtpPacket.decode(data)
 
 				ts, seq, is_last, payload = rtpPacket.timestamp(), rtpPacket.seqNum(), (rtpPacket.marker() == 1), rtpPacket.getPayload()
+				# 1. Log in ra từng mảnh (Fragment) nhận được
+				print(f"  -> [UDP RX FRAG] ts={ts} | Seq={seq:5d} | Marker={rtpPacket.marker()} | Len={len(payload):4d} bytes")
 
 				with self.bufferLock:
 					if ts not in self.reassemblyBuffer:
@@ -173,6 +175,10 @@ class Client:
 
 						if len(entry['fragments']) == (seqs[-1] - seqs[0] + 1):
 							assembled = b''.join(entry['fragments'][s % 65536] for s in seqs)
+
+							# 2. Log báo hiệu gộp thành công 1 Frame
+							print(f"[UDP RX COMPLETE] ts={ts} | Assembled {len(seqs)} frags | Total={len(assembled)} bytes")
+
 							# BỎ CHẶN KIỂM TRA ĐẦY. Hàm put() sẽ Block luồng này lại nếu đầy
 							self.frameCache.put(assembled)
 							del self.reassemblyBuffer[ts]
@@ -212,6 +218,9 @@ class Client:
 				rtpPacket = RtpPacket()
 				rtpPacket.decode(packet_data)
 				
+				# Thêm log để thấy TCP nhận Frame nguyên vẹn
+				print(f"[TCP RX COMPLETE] ts={rtpPacket.timestamp()} | Seq={rtpPacket.seqNum():5d} | Total={len(rtpPacket.getPayload()):6d} bytes")
+
 				# Hàm put() sẽ tự động Block nếu cache đã đầy.
 				# Điều này tạo Áp lực ngược (Backpressure) làm ngừng hàm recvall()
 				self.frameCache.put(rtpPacket.getPayload())
@@ -316,6 +325,7 @@ class Client:
 			self.requestSent = self.SWITCH
 		else: return
 
+		print('\n' + '\n'.join([f"C: {line}" for line in request.split('\n') if line.strip()]))
 		self.rtspSocket.send(request.encode())
 	
 	def recvRtspReply(self):

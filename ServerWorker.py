@@ -33,7 +33,9 @@ class ServerWorker:
 	def processRtspRequest(self, data):
 		if not data.strip():
 			return
-			
+
+		print('\n' + '\n'.join([f"C: {line}" for line in data.split('\n') if line.strip()]))
+
 		try:
 			request = data.split('\n')
 			line1 = request[0].split(' ')
@@ -171,6 +173,10 @@ class ServerWorker:
 			marker  = 1 if (idx == total_frags - 1) else 0
 
 			packet = self.makeRtp(chunk, self.seqNum, marker, frame_ts)
+
+			# Dòng log này để thấy các mảnh UDP đang được gửi
+			print(f"[UDP TX] ts: {frame_ts} | Seq: {self.seqNum:5d} | Marker: {marker} | Chunk: {len(chunk):4d} bytes")
+
 			if 'rtpSocket' in self.clientInfo:
 				self.clientInfo['rtpSocket'].sendto(packet, (address, port))
 			self.seqNum = (self.seqNum + 1) & 0xFFFF
@@ -185,6 +191,10 @@ class ServerWorker:
 		
 		frame_ts = int(time() * 90000) & 0xFFFFFFFF
 		packet = self.makeRtp(data, self.seqNum, marker=1, timestamp=frame_ts)
+
+		# Thêm dòng log này để thấy TCP gửi nguyên Frame không cắt nhỏ
+		print(f"[TCP TX] ts: {frame_ts} | Seq: {self.seqNum:5d} | Total Size: {len(data):6d} bytes (Unfragmented)")
+
 		self.seqNum = (self.seqNum + 1) & 0xFFFF
 		
 		length_prefix = len(packet).to_bytes(4, byteorder='big')
@@ -212,5 +222,6 @@ class ServerWorker:
 	def replyRtsp(self, code, seq):
 		if code == self.OK_200:
 			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
+			print('\n' + '\n'.join([f"S: {line}" for line in reply.split('\n') if line.strip()]))
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
