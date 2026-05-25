@@ -121,9 +121,7 @@ class ServerWorker:
 		elif requestType == self.TEARDOWN:
 			self.replyRtsp(self.OK_200, seq[1])
 			
-			if 'rtspSocket' in self.clientInfo and self.clientInfo['rtspSocket']:
-				try: self.clientInfo['rtspSocket'][0].close()
-				except: pass
+			# Clean up the streaming resources
 			if 'rtpSocket' in self.clientInfo:
 				try: self.clientInfo['rtpSocket'].close()
 				except: pass
