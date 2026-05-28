@@ -276,11 +276,6 @@ class Client:
 				stale = [ts for ts, info in self.reassemblyBuffer.items() if now - info['arrived'] > REASSEMBLY_TIMEOUT]
 				for ts in stale:
 					del self.reassemblyBuffer[ts]
-
-	def writeFrame(self, data):
-		cachename = CACHE_FILE_NAME + str(self.sessionId) + CACHE_FILE_EXT
-		with open(cachename, "wb") as f: f.write(data)
-		return cachename
 	
 	def updateMovie(self, imageFile):
 		try:
