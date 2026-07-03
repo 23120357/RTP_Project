@@ -101,8 +101,11 @@ class Client:
 			self.fileName = "movie/movie_FHD.Mjpeg"
 			self.transport = "TCP"
 		
-		with self.frameCache.mutex:
-			self.frameCache.queue.clear()
+		try:
+			while True:
+				self.frameCache.get_nowait()
+		except queue.Empty:
+			pass
 
 		self.is_buffering = True
 			
