@@ -185,8 +185,13 @@ class ServerWorker:
 		if 'rtpTcpSocket' not in self.clientInfo:
 			try:
 				self.clientInfo['rtpTcpSocket'] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				self.clientInfo['rtpTcpSocket'].settimeout(2.0)
 				self.clientInfo['rtpTcpSocket'].connect((address, port))
 			except Exception:
+				if 'rtpTcpSocket' in self.clientInfo:
+					try: self.clientInfo['rtpTcpSocket'].close()
+					except: pass
+					del self.clientInfo['rtpTcpSocket']
 				return
 		
 		frame_ts = int(time() * 90000) & 0xFFFFFFFF
